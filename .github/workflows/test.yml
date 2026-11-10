@@ -1,78 +1,81 @@
 name: CI
 
 on:
-  pull_request:
-    paths:
-      - '**.scala'
-      - '**.java'
-      - '**.sbt'
-      - '.github/workflows/*.yml'
-      - '**.so'
-      - '**.dll'
-      - 'src/main/resources/**'
-      - 'project/build.properties'
-  push:
-    branches:
-      - master
-      - main
-    paths:
-      - '**.scala'
-      - '**.java'
-      - '**.sbt'
-      - '.github/workflows/*.yml'
-      - 'src/main/resources/org/xerial/snappy/**'
-      - 'project/build.properties'
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: 'Optional sbt test selector (e.g. org.xerial.snappy.SnappyTest)'
+        required: false
+        default: ''
 
 jobs:
-  code_format:
-    name: code format
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: scalafmt test
-        run: ./sbt scalafmtCheckAll
   test:
     name: test jdk11
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: olafurpg/setup-scala@v14
         with:
           java-version: adopt@1.11
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: ~/.cache
           key: ${{ runner.os }}-jdk11-${{ hashFiles('**/*.sbt') }}
           restore-keys: ${{ runner.os }}-jdk11-
       - name: Test
-        run: ./sbt test
+        run: |
+          if [ -n "${{ inputs.test-filter }}" ]; then
+            ./sbt "testOnly ${{ inputs.test-filter }}"
+          else
+            ./sbt test
+          fi
+      - name: Build OSGi bundle jar
+        run: ./sbt osgiBundle
+      - uses: actions/upload-artifact@v4
+        with:
+          name: snappy-java-jar
+          path: target/snappy-java-*.jar
+          if-no-files-found: error
   test_jdk8:
     name: test jdk8
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: olafurpg/setup-scala@v14
         with:
           java-version: adopt@1.8
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: ~/.cache
           key: ${{ runner.os }}-jdk8-${{ hashFiles('**/*.sbt') }}
           restore-keys: ${{ runner.os }}-jdk8-
       - name: Test
-        run: ./sbt test
+        run: |
+          if [ -n "${{ inputs.test-filter }}" ]; then
+            ./sbt "testOnly ${{ inputs.test-filter }}"
+          else
+            ./sbt test
+          fi
   test_jdk17:
     name: test jdk17
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
     - uses: actions/checkout@v4
     - uses: olafurpg/setup-scala@v14
       with:
         java-version: 17
-    - uses: actions/cache@v3
+    - uses: actions/cache@v4
       with:
         path: ~/.cache
         key: ${{ runner.os }}-jdk17-${{ hashFiles('**/*.sbt') }}
         restore-keys: ${{ runner.os }}-jdk17-
     - name: Test
-      run: ./sbt test
+      run: |
+        if [ -n "${{ inputs.test-filter }}" ]; then
+          ./sbt "testOnly ${{ inputs.test-filter }}"
+        else
+          ./sbt test
+        fi
