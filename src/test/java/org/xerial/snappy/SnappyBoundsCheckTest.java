@@ -600,4 +600,58 @@ public class SnappyBoundsCheckTest
             in.close();
         }
     }
+
+    // GHSA-6gp7-6wmv-gxqw: a long run of concatenated stream headers must not exhaust the stack
+    @Test
+    public void inputStreamWithManyConcatenatedHeaders()
+            throws Exception
+    {
+        ByteArrayOutputStream single = new ByteArrayOutputStream();
+        SnappyOutputStream out = new SnappyOutputStream(single);
+        out.write("hello".getBytes("UTF-8"));
+        out.close();
+        byte[] stream = single.toByteArray();
+        byte[] header = Arrays.copyOf(stream, SnappyCodec.headerSize());
+
+        ByteArrayOutputStream data = new ByteArrayOutputStream();
+        data.write(stream);
+        for (int i = 0; i < 100000; i++) {
+            data.write(header);
+        }
+        data.write(stream, header.length, stream.length - header.length);
+
+        byte[] result = readAll(new SnappyInputStream(new ByteArrayInputStream(data.toByteArray())));
+        assertEquals("hellohello", new String(result, "UTF-8"));
+    }
+
+    // GHSA-6gp7-6wmv-gxqw: a chunk header alone must not allocate the declared chunk size
+    @Test
+    public void inputStreamWithTruncatedLargeChunk()
+            throws Exception
+    {
+        ByteArrayOutputStream data = new ByteArrayOutputStream();
+        ByteArrayOutputStream single = new ByteArrayOutputStream();
+        new SnappyOutputStream(single).close();
+        data.write(Arrays.copyOf(single.toByteArray(), SnappyCodec.headerSize()));
+        // declare a 500 MiB chunk followed by only a few bytes
+        int chunkSize = 500 * 1024 * 1024;
+        data.write(new byte[] {(byte) (chunkSize >>> 24), (byte) (chunkSize >>> 16), (byte) (chunkSize >>> 8),
+                (byte) chunkSize, 1, 2, 3});
+
+        long before = usedHeap();
+        try {
+            readAll(new SnappyInputStream(new ByteArrayInputStream(data.toByteArray())));
+            fail("expected IOException");
+        }
+        catch (IOException e) {
+            // expected: the chunk is truncated
+        }
+        assertTrue("allocated too much memory for a truncated chunk", usedHeap() - before < 100L * 1024 * 1024);
+    }
+
+    private static long usedHeap()
+    {
+        Runtime rt = Runtime.getRuntime();
+        return rt.totalMemory() - rt.freeMemory();
+    }
 }
